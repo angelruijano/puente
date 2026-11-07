@@ -1,0 +1,15 @@
+# Compilados
+build/
+*.apk
+*.app
+*.zip
+# Firmas y secretos: nunca al repositorio
+*.keystore
+*.jks
+*.p12
+*.key
+*.shortcut
+secrets*.json
+.env*
+# macOS
+.DS_Store

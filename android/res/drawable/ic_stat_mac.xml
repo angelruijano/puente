@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícono pequeño de notificación: un portátil -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M5,5h14a1,1 0 0,1 1,1v9H4V6a1,1 0 0,1 1,-1zM6,7v6h12V7z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M2,16h20v1a2,2 0 0,1 -2,2H4a2,2 0 0,1 -2,-2z" />
+</vector>
