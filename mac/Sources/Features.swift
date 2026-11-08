@@ -7,6 +7,7 @@ import UserNotifications
 
 final class Mirror {
     private var process: Process?
+    private var navBar: NavBar?
     var onChange: ((Bool) -> Void)?
     var running: Bool { process?.isRunning == true }
 
@@ -19,27 +20,113 @@ final class Mirror {
             return
         }
         guard let exe = Self.path else { Log.info("scrcpy no está instalado"); return }
+        let wifi = serial.contains(":") || serial.contains("_adb-tls-connect")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: exe)
         p.arguments = ["-s", serial, "--window-title", UserDefaults.standard.string(forKey: "phoneName") ?? "Tu celular",
                        "--turn-screen-off",       // la pantalla del celular se apaga mientras lo usas desde el Mac
                        "--keyboard=uhid",         // teclado del Mac como teclado físico (tildes, ñ, atajos)
-                       "--video-bit-rate=12M", "--max-fps=60"]
+                       // Mouse como en Enlace a Windows: clic = toque, arrastrar = deslizar, rueda = scroll, entra y sale libre.
+                       // Clic derecho = Atrás, medio = Inicio, botón 4 = Recientes, botón 5 = notificaciones.
+                       "--mouse=sdk", "--mouse-bind=bhsn:++++",
+                       // H.265 rinde más imagen por el mismo ancho de banda; por Wi‑Fi se baja un poco para que vaya fluido
+                       "--video-codec=h265", "--max-fps=60"]
+            + (wifi ? ["--video-bit-rate=6M", "--max-size=1600"] : ["--video-bit-rate=16M"])
                        // el sonido del celular sale por el Mac mientras la ventana está abierta, como en el iPhone
         var env = ProcessInfo.processInfo.environment
         env["ADB"] = Adb.path
         p.environment = env
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
-        p.terminationHandler = { [weak self] _ in DispatchQueue.main.async { self?.onChange?(false) } }
-        do { try p.run(); process = p; onChange?(true) } catch { Log.info("scrcpy: \(error)") }
+        p.terminationHandler = { [weak self] _ in DispatchQueue.main.async {
+            self?.navBar?.close(); self?.navBar = nil
+            self?.onChange?(false)
+        } }
+        do { try p.run(); process = p; onChange?(true) } catch { Log.info("scrcpy: \(error)"); return }
+        navBar = NavBar(pid: p.processIdentifier, serial: serial)
         // Traer la ventana al frente cuando aparezca
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             NSRunningApplication(processIdentifier: p.processIdentifier)?.activate()
         }
     }
 
-    func close() { process?.terminate(); process = nil }
+    func close() { navBar?.close(); navBar = nil; process?.terminate(); process = nil }
+}
+
+/// Barra Atrás · Inicio · Recientes pegada bajo la ventana del celular (como en Enlace a Windows).
+/// Sigue a la ventana de scrcpy y solo se muestra mientras esa ventana está al frente.
+final class NavBar {
+    private let pid: pid_t
+    private let serial: String
+    private let panel: NSPanel
+    private var timer: Timer?
+    static let height: CGFloat = 40
+
+    init(pid: pid_t, serial: String) {
+        self.pid = pid
+        self.serial = serial
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: Self.height),
+                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        panel.level = .floating
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = NSHostingView(rootView: NavBarView { [serial] key in
+            DispatchQueue.global().async { _ = Adb.shell(serial, "input keyevent \(key)", timeout: 5) }
+        })
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.follow() }
+    }
+
+    func close() { timer?.invalidate(); timer = nil; panel.orderOut(nil) }
+
+    /// Marco de la ventana de scrcpy (coordenadas de Quartz: origen arriba a la izquierda).
+    private func scrcpyFrame() -> CGRect? {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return nil }
+        for w in list where (w[kCGWindowOwnerPID as String] as? pid_t) == pid && (w[kCGWindowLayer as String] as? Int) == 0 {
+            if let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b), r.width > 100 { return r }
+        }
+        return nil
+    }
+
+    private func follow() {
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        guard front == pid || front == ProcessInfo.processInfo.processIdentifier, let r = scrcpyFrame() else {
+            if panel.isVisible { panel.orderOut(nil) }
+            return
+        }
+        let screenH = NSScreen.screens.first?.frame.height ?? 0
+        let width = max(180, min(r.width, 360))
+        var y = screenH - r.maxY - Self.height - 6          // justo debajo de la ventana
+        if let vis = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: r.midX, y: screenH - r.midY)) })?.visibleFrame,
+           y < vis.minY { y = screenH - r.maxY + 6 }       // si no cabe abajo, se monta sobre el borde inferior
+        let frame = NSRect(x: r.midX - width / 2, y: y, width: width, height: Self.height)
+        if panel.frame != frame { panel.setFrame(frame, display: true) }
+        if !panel.isVisible { panel.orderFrontRegardless() }
+    }
+}
+
+private struct NavBarView: View {
+    let send: (String) -> Void
+    var body: some View {
+        HStack(spacing: 0) {
+            button("chevron.backward", "Atrás (clic derecho)", "KEYCODE_BACK")
+            button("circle", "Inicio (clic central)", "KEYCODE_HOME")
+            button("square", "Recientes", "KEYCODE_APP_SWITCH")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.regularMaterial, in: Capsule())
+    }
+
+    private func button(_ icon: String, _ help: String, _ key: String) -> some View {
+        Button { send(key) } label: {
+            Image(systemName: icon).font(.system(size: 15, weight: .semibold))
+                .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).help(help)
+    }
 }
 
 // MARK: - No molestar sincronizado
