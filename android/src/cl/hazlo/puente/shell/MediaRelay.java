@@ -197,7 +197,7 @@ final class MediaRelay {
                 switch (m.optString("t")) {
                     case "notif": case "call": onNotif(m); break;
                     case "notifRemoved": case "ble": case "dnd": case "smsSent": case "ringState": case "sims":
-                    case "smsThreads": case "smsThread": case "smsChanged": case "fileOut":
+                    case "smsThreads": case "smsThread": case "smsChanged": case "fileOut": case "home":
                         toMac.accept(m); break;
                     case "openOnMac": toMac.accept(Links.withVideoTime(m)); break;
                 }

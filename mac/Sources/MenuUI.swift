@@ -24,6 +24,8 @@ final class MenuModel: ObservableObject {
     @Published var photosOn = true
     @Published var dndOn = true
     @Published var dndReady = false
+    @Published var autoHotspotOn = true
+    @Published var micDndOn = true
     @Published var tabError: String? = nil
     @Published var transfer: String?
 
@@ -42,6 +44,8 @@ final class MenuModel: ObservableObject {
     var onPhotosToggle: ((Bool) -> Void)?
     var onDndToggle: ((Bool) -> Void)?
     var onInstallShortcuts: (() -> Void)?
+    var onAutoHotspotToggle: ((Bool) -> Void)?
+    var onMicDndToggle: ((Bool) -> Void)?
 }
 
 // MARK: - Acciones rápidas
@@ -287,6 +291,9 @@ struct NotificationsSection: View {
             if m.dndOn && !m.dndReady {
                 Button("Añadir atajos…") { m.onInstallShortcuts?() }.controlSize(.small).padding(.leading, 30)
             }
+            ToggleRow(icon: "mic.fill", title: "Silencio en reuniones",
+                      subtitle: "No molestar en el celular si usas el micrófono",
+                      isOn: Binding(get: { m.micDndOn }, set: { m.micDndOn = $0; m.onMicDndToggle?($0) }))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
@@ -338,6 +345,9 @@ struct NearbySection: View {
                 .padding(.leading, 30)
             }
             HotspotRow(m: m)
+            ToggleRow(icon: "wifi.exclamationmark", title: "Hotspot automático",
+                      subtitle: m.hotspotReady ? "Si el Mac se queda sin Wi‑Fi" : "Se activa tras la primera conexión",
+                      isOn: Binding(get: { m.autoHotspotOn }, set: { m.autoHotspotOn = $0; m.onAutoHotspotToggle?($0) }))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)

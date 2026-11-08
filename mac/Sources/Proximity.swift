@@ -239,6 +239,9 @@ final class Hotspot {
         }
     }
 
+    /// El Mac perdió la red estando en el hotspot: ya no está conectado.
+    func markLost() { if state == .connected { state = .idle } }
+
     func disconnect() {
         proximity.send(command: 2) { _ in }
         state = .idle // el Mac vuelve solo a su red conocida

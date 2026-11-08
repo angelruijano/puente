@@ -19,9 +19,11 @@ Sin nube, sin cuentas y sin servidores de terceros: todo va directo entre tus do
 | 📁 **Archivos tipo AirDrop** | Arrastra archivos o carpetas al ícono de la barra de menú, o usa «Compartir → Enviar al Mac» en el celular. |
 | 📱 **Pantalla** | Ve y controla el celular desde el Mac (usa [scrcpy](https://github.com/Genymobile/scrcpy)). |
 | 📶 **Hotspot instantáneo** | Enciende el hotspot del celular desde el Mac por Bluetooth, sin tocarlo. |
+| 📡 **Hotspot automático** | Si el Mac se queda sin Wi‑Fi y el celular está cerca, enciende el hotspot y se conecta solo. Al llegar a casa lo apaga para no gastar datos. |
 | 🔒 **Bloqueo por proximidad** | El Mac se bloquea cuando te alejas con el celular. Nunca se desbloquea solo. |
 | 🔍 **Buscar mi celular** | Lo hace sonar, vibrar y prender el flash (y las luces Glyph en un Nothing). |
 | 🌙 **No molestar** | Sincronizado entre el Mac y el celular. |
+| 🎙️ **Silencio en reuniones** | Cuando usas el micrófono del Mac (Meet, Zoom, Teams…), el celular entra en No molestar, y vuelve a la normalidad al cortar. |
 | 🔋 **Batería** | La batería del celular, en la barra de menú. |
 | ↗️ **Abrir en el otro** | Comparte una página del celular al Mac (YouTube sigue en el mismo minuto), o la pestaña del Mac al celular. |
 
@@ -110,6 +112,6 @@ install.sh Compila e instala todo
 
 ### English (short)
 
-**Puente** brings iPhone‑style continuity to Android + Mac, with no cloud: universal clipboard, notifications (reply and dismiss), SMS codes auto‑copied, an SMS window, calls, media controls, AirDrop‑like file transfer, screen mirroring (scrcpy), instant hotspot over BLE, proximity lock, Do Not Disturb sync and battery in the menu bar.
+**Puente** brings iPhone‑style continuity to Android + Mac, with no cloud: universal clipboard, notifications (reply and dismiss), SMS codes auto‑copied, an SMS window, calls, media controls, AirDrop‑like file transfer, screen mirroring (scrcpy), instant hotspot over BLE (automatic when the Mac loses Wi‑Fi), proximity lock, auto‑DND on the phone during calls on the Mac, Do Not Disturb sync and battery in the menu bar.
 
 The traffic is end‑to‑end encrypted (X25519 + HKDF + AES‑GCM with forward secrecy) and only accepted on trusted home Wi‑Fi or the phone's hotspot. It needs an Apple Silicon Mac, Android 11+ with USB debugging kept on, Java 17 and the Android SDK to build. Run `./install.sh` with the phone plugged in. It was tested on a Nothing Phone 2 (Android 16); it uses hidden APIs, so expect rough edges. The UI is in Spanish. MIT licensed.

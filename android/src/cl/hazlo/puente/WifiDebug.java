@@ -143,7 +143,17 @@ final class WifiDebug {
         final Context app = c.getApplicationContext();
         lastHome = home;
         new Thread(() -> DaemonClient.ask(app, "{\"c\":\"home\",\"on\":" + home + "}"), "home").start();
+        tellMac(home);
     }
+
+    /** El Mac también lo sabe: si está usando el hotspot y el celular llegó a casa, lo apaga y vuelve al Wi‑Fi. */
+    static void tellMac(boolean home) {
+        NotifListener l = NotifListener.instance;
+        if (l == null) return;
+        try { l.sendToMac(new org.json.JSONObject().put("t", "home").put("on", home)); } catch (Exception ignored) {}
+    }
+
+    static Boolean lastHome() { return lastHome; }
 
     /** Repite el último aviso (p. ej. cuando el residente acaba de arrancar). */
     static void reportHome(Context c) {

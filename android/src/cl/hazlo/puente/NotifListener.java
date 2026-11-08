@@ -105,6 +105,8 @@ public class NotifListener extends NotificationListenerService {
                     out = os;
                     failures = 0;
                     sendDnd(getCurrentInterruptionFilter());
+                    Boolean home = WifiDebug.lastHome();
+                    if (home != null) WifiDebug.tellMac(home);
                     BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
                     String line;
                     while ((line = in.readLine()) != null) fromMac(new JSONObject(line));

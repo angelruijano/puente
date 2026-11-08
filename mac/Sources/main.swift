@@ -21,6 +21,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var files = FileTransfer(link: link)
     /// Último estado de No molestar que informó el celular (nil hasta que conecta)
     private var phoneDnd: Bool?
+    private let autoHotspot = AutoHotspot()
+    /// El hotspot actual lo encendió Puente solo (se apaga solo al llegar a casa)
+    private var hotspotIsAuto = false
+    /// El celular está en una red de confianza (solo vale mientras hay conexión con él)
+    private var phoneAtHome = false
+    private let mic = MicWatch()
+    /// No molestar del celular lo puso Puente por una reunión (se quita al terminar)
+    private var micSetDnd = false
 
     func applicationWillFinishLaunching(_ n: Notification) {
         // Enlaces tel: y sms: (Chrome, Opera, correos) → el celular
@@ -85,9 +93,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         model.hotspotReady = hotspot.hasCredentials
         model.onLockToggle = { [weak self] on in self?.proximity.lockEnabled = on; self?.defaults.set(on, forKey: "lock") }
         model.onSensitivity = { [weak self] v in self?.proximity.sensitivity = v; self?.defaults.set(v.rawValue, forKey: "sensitivity") }
-        model.onHotspot = { [weak self] on in on ? self?.hotspot.connect() : self?.hotspot.disconnect() }
+        model.onHotspot = { [weak self] on in
+            guard let self else { return }
+            self.hotspotIsAuto = false
+            if on { self.hotspot.connect() } else { self.hotspot.disconnect(); self.autoHotspot.userTurnedOff() }
+        }
         proximity.onStatus = { [weak self] st in if self?.model.proximity != st { self?.model.proximity = st } }
         hotspot.onState = { [weak self] st in self?.model.hotspot = st }
+        setupAutoHotspot()
         proximity.start()
 
         setupFeatures()
@@ -101,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.model.connected = false; self.model.battery = nil; self.model.ringing = false
                 self.messages.model.connected = false; self.model.viaHotspot = false
                 self.phoneDnd = nil
+                self.phoneAtHome = false
             case .connected(let wifi):
                 self.model.connected = true; self.model.wifi = wifi
                 self.model.viaHotspot = self.link.netKind == .hotspot
@@ -136,6 +150,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.model.ringing = m["on"] as? Bool ?? false
             case "dnd":
                 self.phoneDndChanged(m["on"] as? Bool ?? false)
+            case "home":
+                self.phoneHomeChanged(m["on"] as? Bool ?? false)
             case "photo":
                 self.photoArrived(m)
             case "openOnMac":
@@ -258,6 +274,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         focus.start()
 
+        model.micDndOn = defaults.object(forKey: "micDnd") as? Bool ?? true
+        model.onMicDndToggle = { [weak self] on in
+            guard let self else { return }
+            self.defaults.set(on, forKey: "micDnd")
+            if !on && self.micSetDnd { self.micChanged(false) }
+        }
+        mic.onChange = { [weak self] on in self?.micChanged(on) }
+        mic.start()
+
         // Ser la app para enlaces tel: y sms: (macOS puede pedir confirmación una vez)
         if !defaults.bool(forKey: "urlHandlers") {
             for scheme in ["tel", "sms"] {
@@ -266,6 +291,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             }
             defaults.set(true, forKey: "urlHandlers")
+        }
+    }
+
+    // MARK: Automatizaciones
+
+    private func setupAutoHotspot() {
+        model.autoHotspotOn = defaults.object(forKey: "autoHotspot") as? Bool ?? true
+        model.onAutoHotspotToggle = { [weak self] on in self?.defaults.set(on, forKey: "autoHotspot") }
+        autoHotspot.canConnect = { [weak self] in
+            guard let self else { return false }
+            return self.model.autoHotspotOn && self.hotspot.hasCredentials && self.proximity.status.seen
+                && !self.phoneAtHome && !self.lidClosed && !AutoHotspot.screenLocked
+                && self.hotspot.state != .connecting && self.hotspot.state != .connected
+        }
+        autoHotspot.connect = { [weak self] in
+            guard let self else { return }
+            self.hotspotIsAuto = true
+            Toast.show("El Mac se quedó sin Wi‑Fi", "Conectando al hotspot de tu celular…")
+            self.hotspot.connect()
+        }
+        autoHotspot.onLost = { [weak self] in self?.hotspot.markLost() }
+        autoHotspot.start()
+    }
+
+    /// El celular llegó a una red de confianza: si el Mac va por el hotspot que Puente encendió solo, apagarlo.
+    private func phoneHomeChanged(_ home: Bool) {
+        phoneAtHome = home
+        guard home, hotspotIsAuto, hotspot.state == .connected || link.netKind == .hotspot else { return }
+        Log.info("hotspot automático: el celular llegó a casa, apagándolo")
+        hotspotIsAuto = false
+        hotspot.disconnect()
+        Toast.show("Llegaste a casa", "Apagué el hotspot; el Mac vuelve a tu Wi‑Fi")
+    }
+
+    /// Reunión en el Mac → No molestar en el celular, y al terminar vuelve como estaba.
+    private func micChanged(_ on: Bool) {
+        if on {
+            guard model.micDndOn, link.isConnected, phoneDnd == false else { return } // si ya estaba en No molestar, no se toca
+            Log.info("reunión en el Mac: No molestar en el celular")
+            micSetDnd = true; phoneDnd = true
+            link.send(["t": "dnd", "on": true])
+        } else if micSetDnd {
+            guard link.isConnected else { return } // se quita al reconectar (phoneDndChanged)
+            micSetDnd = false
+            guard phoneDnd == true else { return }
+            Log.info("reunión terminada: se quita No molestar del celular")
+            phoneDnd = false
+            link.send(["t": "dnd", "on": false])
         }
     }
 
@@ -282,6 +355,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func phoneDndChanged(_ on: Bool) {
+        if micSetDnd {
+            if !on { micSetDnd = false }  // lo quitaste tú en el celular: ya no es asunto de Puente
+            else if !mic.inUse {          // la reunión terminó mientras estaba desconectado
+                micSetDnd = false; phoneDnd = false
+                link.send(["t": "dnd", "on": false]); return
+            }
+        }
         let first = phoneDnd == nil
         let changed = phoneDnd != on
         phoneDnd = on
