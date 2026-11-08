@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="keymap_desc">Atajos de teclado para reproductores: flechas adelantan o retroceden 10 segundos y espacio pausa. Solo en la app que está reproduciendo y nunca mientras escribes.</string>
+</resources>
