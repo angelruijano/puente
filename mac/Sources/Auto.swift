@@ -80,10 +80,14 @@ final class AutoHotspot {
     }
 }
 
-/// Micrófono del Mac en uso (Meet, Zoom, Teams, FaceTime…). Avisa con un poco de margen para no saltar con dictados cortos.
+/// Micrófono del Mac en uso por una app de reuniones (Meet, Zoom, Teams, FaceTime…).
+/// Mira qué app lo tiene abierto: algunas (Discord) lo dejan abierto aunque estés silenciado, y se pueden ignorar.
 final class MicWatch {
     var onChange: ((Bool) -> Void)?
+    /// La app que tiene el micrófono (nombre visible), o nil.
+    var onApp: ((String?) -> Void)?
     private(set) var inUse = false
+    private(set) var current: (id: String, name: String)?
     private var since = Date()
     private var raw = false
     private var timer: Timer?
@@ -91,41 +95,63 @@ final class MicWatch {
     static let onDelay: TimeInterval = 6     // micrófono abierto este tiempo → reunión
     static let offDelay: TimeInterval = 15   // y cerrado este tiempo → terminó
 
+    /// Apps ignoradas: identificador → nombre. Discord viene ignorado de entrada.
+    var ignored: [String: String] {
+        get { UserDefaults.standard.dictionary(forKey: "micIgnore") as? [String: String] ?? ["com.hnc.Discord": "Discord"] }
+        set { UserDefaults.standard.set(newValue, forKey: "micIgnore"); poll() }
+    }
+
+    /// Procesos del sistema que escuchan sin que sea una reunión (dictado, Siri, "Oye Siri").
+    private static let system = ["com.apple.CoreSpeech", "com.apple.corespeech", "com.apple.SpeechRecognitionCore",
+                                 "com.apple.assistant", "com.apple.siri", "com.apple.Siri", "com.apple.dictation",
+                                 "com.apple.voicetrigger", "com.apple.accessibility", "cl.hazlo.puente"]
+
     func start() {
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.poll() }
     }
 
+    func ignoreCurrent() {
+        guard let c = current else { return }
+        var m = ignored; m[c.id] = c.name; ignored = m
+        Log.info("micrófono: se ignora \(c.name)")
+    }
+
     private func poll() {
-        let now = Self.anyInputRunning()
+        let ign = Array(ignored.keys)
+        let apps = Self.appsUsingMic().filter { a in !ign.contains { a.id.hasPrefix($0) } }
+        let first = apps.first
+        if first?.id != current?.id { current = first; onApp?(first?.name) }
+        let now = first != nil
         if now != raw { raw = now; since = Date() }
         let wait = raw ? Self.onDelay : Self.offDelay
         guard raw != inUse, Date().timeIntervalSince(since) >= wait else { return }
         inUse = raw
-        Log.info("micrófono del Mac: \(inUse ? "en uso" : "libre")")
+        Log.info("micrófono del Mac: \(inUse ? "en uso (\(first?.name ?? "?"))" : "libre")")
         onChange?(inUse)
     }
 
-    /// Algún micrófono real está grabando. Se ignoran los virtuales (Teams, Zoom, BlackHole…), que pueden quedar abiertos sin llamada.
-    static func anyInputRunning() -> Bool {
-        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
+    /// Apps que están grabando del micrófono ahora (macOS 14+), agrupadas por app (los ayudantes cuentan como su app).
+    static func appsUsingMic() -> [(id: String, name: String)] {
+        let sys = AudioObjectID(kAudioObjectSystemObject)
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList,
                                               mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var size: UInt32 = 0
-        let sys = AudioObjectID(kAudioObjectSystemObject)
-        guard AudioObjectGetPropertyDataSize(sys, &addr, 0, nil, &size) == noErr else { return false }
+        guard AudioObjectGetPropertyDataSize(sys, &addr, 0, nil, &size) == noErr else { return [] }
         var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
-        guard AudioObjectGetPropertyData(sys, &addr, 0, nil, &size, &ids) == noErr else { return false }
-        for id in ids where hasInput(id) {
-            if uint(id, kAudioDevicePropertyTransportType) == kAudioDeviceTransportTypeVirtual { continue }
-            if uint(id, kAudioDevicePropertyDeviceIsRunningSomewhere) != 0 { return true }
+        guard AudioObjectGetPropertyData(sys, &addr, 0, nil, &size, &ids) == noErr else { return [] }
+        let running = NSWorkspace.shared.runningApplications
+        var out: [(id: String, name: String)] = []
+        for id in ids where uint(id, kAudioProcessPropertyIsRunningInput) != 0 {
+            let bundle = string(id, kAudioProcessPropertyBundleID) ?? ""
+            if bundle.isEmpty || system.contains(where: { bundle.hasPrefix($0) }) { continue }
+            // "com.hnc.Discord.helper.Renderer" → la app "com.hnc.Discord"
+            let app = running.filter { a in a.bundleIdentifier.map { bundle == $0 || bundle.hasPrefix($0 + ".") } ?? false }
+                .max { ($0.bundleIdentifier?.count ?? 0) < ($1.bundleIdentifier?.count ?? 0) }
+            let appID = app?.bundleIdentifier ?? bundle
+            if out.contains(where: { $0.id == appID }) { continue }
+            out.append((appID, app?.localizedName ?? appID))
         }
-        return false
-    }
-
-    private static func hasInput(_ id: AudioObjectID) -> Bool {
-        var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams,
-                                              mScope: kAudioDevicePropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
-        var size: UInt32 = 0
-        return AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size) == noErr && size > 0
+        return out
     }
 
     private static func uint(_ id: AudioObjectID, _ sel: AudioObjectPropertySelector) -> UInt32 {
@@ -133,5 +159,13 @@ final class MicWatch {
         var v: UInt32 = 0
         var size = UInt32(MemoryLayout<UInt32>.size)
         return AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &v) == noErr ? v : 0
+    }
+
+    private static func string(_ id: AudioObjectID, _ sel: AudioObjectPropertySelector) -> String? {
+        var addr = AudioObjectPropertyAddress(mSelector: sel, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var v: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &v) == noErr, let s = v?.takeRetainedValue() else { return nil }
+        return s as String
     }
 }

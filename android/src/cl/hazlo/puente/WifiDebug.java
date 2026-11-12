@@ -144,6 +144,39 @@ final class WifiDebug {
         lastHome = home;
         new Thread(() -> DaemonClient.ask(app, "{\"c\":\"home\",\"on\":" + home + "}"), "home").start();
         tellMac(home);
+        advertise(app, home);
+    }
+
+    private static android.net.nsd.NsdManager.RegistrationListener nsdReg;
+
+    /**
+     * En casa, el celular se anuncia en la red local (mDNS, "_puente._tcp") para que el Mac lo encuentre
+     * al instante aunque el router le haya dado otra IP. Fuera de casa no se anuncia.
+     * El anuncio no da acceso a nada: para entrar hay que tener la llave compartida.
+     */
+    static synchronized void advertise(Context c, boolean on) {
+        android.net.nsd.NsdManager nsd = c.getSystemService(android.net.nsd.NsdManager.class);
+        if (nsd == null) return;
+        if (on && nsdReg == null) {
+            android.net.nsd.NsdServiceInfo si = new android.net.nsd.NsdServiceInfo();
+            si.setServiceName("Puente");
+            si.setServiceType("_puente._tcp");
+            si.setPort(47930);
+            nsdReg = new android.net.nsd.NsdManager.RegistrationListener() {
+                @Override public void onServiceRegistered(android.net.nsd.NsdServiceInfo i) { Log.i("Puente", "anunciado en la red: " + i.getServiceName()); }
+                @Override public void onRegistrationFailed(android.net.nsd.NsdServiceInfo i, int err) {
+                    Log.i("Puente", "no pude anunciarme en la red: " + err);
+                    synchronized (WifiDebug.class) { if (nsdReg == this) nsdReg = null; }
+                }
+                @Override public void onServiceUnregistered(android.net.nsd.NsdServiceInfo i) {}
+                @Override public void onUnregistrationFailed(android.net.nsd.NsdServiceInfo i, int err) {}
+            };
+            try { nsd.registerService(si, android.net.nsd.NsdManager.PROTOCOL_DNS_SD, nsdReg); }
+            catch (Exception e) { nsdReg = null; }
+        } else if (!on && nsdReg != null) {
+            try { nsd.unregisterService(nsdReg); } catch (Exception ignored) {}
+            nsdReg = null;
+        }
     }
 
     /** El Mac también lo sabe: si está usando el hotspot y el celular llegó a casa, lo apaga y vuelve al Wi‑Fi. */

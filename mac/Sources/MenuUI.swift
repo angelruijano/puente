@@ -26,6 +26,8 @@ final class MenuModel: ObservableObject {
     @Published var dndReady = false
     @Published var autoHotspotOn = true
     @Published var micDndOn = true
+    @Published var micApp: String? = nil
+    @Published var micIgnored: [String] = []
     @Published var tabError: String? = nil
     @Published var transfer: String?
 
@@ -46,6 +48,8 @@ final class MenuModel: ObservableObject {
     var onInstallShortcuts: (() -> Void)?
     var onAutoHotspotToggle: ((Bool) -> Void)?
     var onMicDndToggle: ((Bool) -> Void)?
+    var onMicIgnoreCurrent: (() -> Void)?
+    var onMicIgnoreClear: (() -> Void)?
 }
 
 // MARK: - Acciones rápidas
@@ -294,6 +298,20 @@ struct NotificationsSection: View {
             ToggleRow(icon: "mic.fill", title: "Silencio en reuniones",
                       subtitle: "No molestar en el celular si usas el micrófono",
                       isOn: Binding(get: { m.micDndOn }, set: { m.micDndOn = $0; m.onMicDndToggle?($0) }))
+            if m.micDndOn {
+                if let app = m.micApp {
+                    HStack(spacing: 6) {
+                        Text("Micrófono: \(app)").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                        Button("Ignorar") { m.onMicIgnoreCurrent?() }.controlSize(.mini)
+                    }.padding(.leading, 30)
+                }
+                if !m.micIgnored.isEmpty {
+                    HStack(spacing: 6) {
+                        Text("Se ignora: \(m.micIgnored.joined(separator: ", "))").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                        Button("Quitar") { m.onMicIgnoreClear?() }.controlSize(.mini)
+                    }.padding(.leading, 30)
+                }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)

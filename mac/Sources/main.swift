@@ -98,7 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.hotspotIsAuto = false
             if on { self.hotspot.connect() } else { self.hotspot.disconnect(); self.autoHotspot.userTurnedOff() }
         }
-        proximity.onStatus = { [weak self] st in if self?.model.proximity != st { self?.model.proximity = st } }
+        proximity.onStatus = { [weak self] st in
+            guard let self, self.model.proximity != st else { return }
+            if st.seen && !self.model.proximity.seen { self.link.kick("celular a la vista") }
+            self.model.proximity = st
+        }
         hotspot.onState = { [weak self] st in self?.model.hotspot = st }
         setupAutoHotspot()
         proximity.start()
@@ -281,6 +285,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !on && self.micSetDnd { self.micChanged(false) }
         }
         mic.onChange = { [weak self] on in self?.micChanged(on) }
+        mic.onApp = { [weak self] name in self?.model.micApp = name }
+        model.micIgnored = mic.ignored.values.sorted()
+        model.onMicIgnoreCurrent = { [weak self] in
+            guard let self else { return }
+            self.mic.ignoreCurrent(); self.model.micIgnored = self.mic.ignored.values.sorted()
+        }
+        model.onMicIgnoreClear = { [weak self] in
+            guard let self else { return }
+            self.mic.ignored = [:]; self.model.micIgnored = []
+        }
         mic.start()
 
         // Ser la app para enlaces tel: y sms: (macOS puede pedir confirmación una vez)

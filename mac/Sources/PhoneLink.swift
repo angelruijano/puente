@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import Network
 
 /// Mantiene viva la conexión con el celular: busca el dispositivo, lanza el ayudante y reconecta si se cae.
 final class PhoneLink {
@@ -35,7 +37,26 @@ final class PhoneLink {
         didSet { if paused && !oldValue { process?.terminate(); net?.close() } }
     }
 
-    func start() { queue.async { self.loop() } }
+    func start() {
+        // Reintentar al tiro cuando cambia la red (llegar a casa, despertar el Mac), sin esperar el turno
+        pathMonitor.pathUpdateHandler = { [weak self] p in if p.status == .satisfied { self?.kick("cambió la red") } }
+        pathMonitor.start(queue: DispatchQueue.global(qos: .utility))
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.kick("el Mac despertó")
+        }
+        queue.async { self.loop() }
+    }
+
+    private let pathMonitor = NWPathMonitor()
+    private let wake = DispatchSemaphore(value: 0)
+
+    /// Hay motivo para intentar ya (red nueva, Mac despierto, celular a la vista). También permite pedir por Bluetooth de nuevo.
+    func kick(_ why: String) {
+        guard !isConnected, !paused else { return }
+        Log.info("reintentando: \(why)")
+        lastBluetoothAsk = .distantPast
+        wake.signal()
+    }
 
     func stop() {
         stopped = true
@@ -56,7 +77,8 @@ final class PhoneLink {
                 DispatchQueue.main.async { self.onState?(.searching) }
                 askForAdbIfUseful()
             }
-            Thread.sleep(forTimeInterval: 4)
+            _ = wake.wait(timeout: .now() + 4)
+            while wake.wait(timeout: .now()) == .success {} // varios avisos juntos cuentan como uno
         }
     }
 
@@ -65,8 +87,17 @@ final class PhoneLink {
         let gw = NetChannel.gateway()
         let purpose = probe ? "probe" : "puente"
         if let gw, let ch = NetChannel.connect(host: gw, purpose: purpose, timeout: 1.5) { return (ch, gw, .hotspot) }
-        if let ip = UserDefaults.standard.string(forKey: Self.phoneIPKey), ip != gw,
-           let ch = NetChannel.connect(host: ip, purpose: purpose, timeout: 1.5) { return (ch, ip, .home) }
+        let saved = UserDefaults.standard.string(forKey: Self.phoneIPKey)
+        if let ip = saved, ip != gw, let ch = NetChannel.connect(host: ip, purpose: purpose, timeout: 1.5) { return (ch, ip, .home) }
+        guard gw != nil else { return nil }
+        // El router le dio otra IP: el celular se anuncia en la red de casa (_puente._tcp)
+        for addr in Bonjour.find("_puente._tcp.", timeout: 1.5) {
+            let ip = String(addr.split(separator: ":")[0])
+            guard ip != gw, ip != saved, let ch = NetChannel.connect(host: ip, purpose: purpose, timeout: 1.5) else { continue }
+            Log.info("celular encontrado en la red: \(ip)")
+            UserDefaults.standard.set(ip, forKey: Self.phoneIPKey)
+            return (ch, ip, .home)
+        }
         return nil
     }
 
