@@ -28,7 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var phoneAtHome = false
     private let mic = MicWatch()
     /// No molestar del celular lo puso Puente por una reunión (se quita al terminar)
-    private var micSetDnd = false
+    /// Se guarda: si Puente se reinicia en plena reunión, al volver sabe que debe quitarlo.
+    private var micSetDnd = UserDefaults.standard.bool(forKey: "micSetDnd") {
+        didSet { UserDefaults.standard.set(micSetDnd, forKey: "micSetDnd") }
+    }
 
     func applicationWillFinishLaunching(_ n: Notification) {
         // Enlaces tel: y sms: (Chrome, Opera, correos) → el celular

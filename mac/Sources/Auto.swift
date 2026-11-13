@@ -92,7 +92,7 @@ final class MicWatch {
     private var raw = false
     private var timer: Timer?
 
-    static let onDelay: TimeInterval = 6     // micrófono abierto este tiempo → reunión
+    static let onDelay: TimeInterval = 45    // micrófono abierto este tiempo → reunión (un dictado dura menos)
     static let offDelay: TimeInterval = 15   // y cerrado este tiempo → terminó
 
     /// Apps ignoradas: identificador → nombre. Discord viene ignorado de entrada.
@@ -101,10 +101,11 @@ final class MicWatch {
         set { UserDefaults.standard.set(newValue, forKey: "micIgnore"); poll() }
     }
 
-    /// Procesos del sistema que escuchan sin que sea una reunión (dictado, Siri, "Oye Siri").
+    /// Procesos del sistema que escuchan sin que sea una reunión (dictado, Siri, "Oye Siri", grabar la pantalla).
     private static let system = ["com.apple.CoreSpeech", "com.apple.corespeech", "com.apple.SpeechRecognitionCore",
                                  "com.apple.assistant", "com.apple.siri", "com.apple.Siri", "com.apple.dictation",
-                                 "com.apple.voicetrigger", "com.apple.accessibility", "cl.hazlo.puente"]
+                                 "com.apple.voicetrigger", "com.apple.accessibility", "cl.hazlo.puente",
+                                 "com.apple.replayd", "com.apple.screencapture", "com.apple.ScreenContinuity"] // grabar la pantalla no es una reunión
 
     func start() {
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.poll() }
