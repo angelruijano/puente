@@ -45,7 +45,7 @@ Sin nube, sin cuentas y sin servidores de terceros: todo va directo entre tus do
 ## Instalación
 
 ```bash
-git clone https://github.com/angelruijano/puente.git
+git clone https://github.com/ruiangabo/puente.git
 cd puente
 ./install.sh
 ```
